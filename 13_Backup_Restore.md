@@ -1,3 +1,5 @@
+
+---
 # Langkah 1: Pastikan Binary Log Aktif di MySQL
 Sebelum melakukan apa pun, pastikan server MySQL Anda sudah mengaktifkan fitur pencatatan Binary Log.
 
@@ -104,3 +106,55 @@ Catatan: Nilai --start-position=481 diambil dari informasi --source-data=2 yang 
 Anda juga bisa memfilter berdasarkan waktu menggunakan --stop-datetime="2026-06-06 13:59:00" jika ingin memulihkan tepat sebelum sistem error.
 
 Dengan menyelesaikan langkah di atas, database Anda tidak hanya kembali ke posisi saat dibackup, tetapi data baru yang masuk setelahnya berhasil diselamatkan sepenuhnya tanpa ada yang hilang!
+
+---
+---
+---
+---
+# INCREMENTAL BACKUP
+
+Metode backup yang hanya mencatat perubahan data setelah backup sebelumnya disebut **Backup Inkremental (Incremental Backup)**. Di MySQL, strategi ini dilakukan dengan memanfaatkan Binary Log (binlog) dan perintah `FLUSH LOGS`.
+
+1. **1. Lakukan Full Backup + Flush Logs:** Membuat titik acuan awal (baseline).
+Jalankan `mysqldump` dengan opsi `--flush-logs`. Parameter ini akan menutup file binlog yang sedang berjalan dan secara otomatis membuat file binlog baru untuk mencatat semua transaksi setelah detik ini:
+
+```bash
+mysqldump -u root -p --single-transaction --flush-logs --delete-master-logs nama_database > full_backup.sql
+
+```
+
+*Sejak perintah ini dieksekusi, seluruh perubahan data baru akan mulai dicatat di file binlog baru (misal: `DESKTOP-EBSM6AD-bin.000004`).*
+
+
+2. **2. Rotasi Log untuk Mengisolasi Perubahan Data:** Membuat file backup inkremental secara berkala (misal: Setiap Malam).
+Ketika Anda ingin mengambil backup inkremental (hanya perubahan sejak full backup di atas), jalankan perintah `flush-logs`:
+
+```bash
+mysqladmin -u root -p flush-logs
+
+```
+
+Perintah ini menutup file `DESKTOP-EBSM6AD-bin.000004` dan membuka file baru `DESKTOP-EBSM6AD-bin.000005`.
+
+
+3. **3. Salin File Binlog yang Sudah Ditutup:** Mengamankan file hasil delta / inkremental.
+Salin file `DESKTOP-EBSM6AD-bin.000004` dari folder data MySQL ke folder tempat Anda menyimpan backup. File ini adalah **Backup Inkremental 1** Anda (hanya berisi data yang ditambah/diubah setelah Full Backup).
+
+*Setiap kali Anda menjalankan `mysqladmin flush-logs`, file binlog lama yang baru ditutup adalah file backup inkremental berikutnya.*
+
+
+4. **4. Cara Restore Backup Inkremental:** Urutan pengembalian data dari awal hingga paling baru.
+Jika terjadi kegagalan sistem, Anda cukup merestore Full Backup terlebih dahulu, lalu memutar ulang file-file binlog secara berurutan:
+
+```bash
+# 1. Restore Full Backup
+mysql -u root -p nama_database < full_backup.sql
+
+# 2. Apply Backup Inkremental Hari ke-1
+mysqlbinlog DESKTOP-EBSM6AD-bin.000004 | mysql -u root -p nama_database
+
+# 3. Apply Backup Inkremental Hari ke-2
+mysqlbinlog DESKTOP-EBSM6AD-bin.000005 | mysql -u root -p nama_database
+
+```
+---
